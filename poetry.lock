@@ -6855,14 +6855,14 @@ files = [
 
 [[package]]
 name = "tifffile"
-version = "2025.9.30"
+version = "2025.10.4"
 description = "Read and write TIFF files"
 optional = false
 python-versions = ">=3.11"
 groups = ["main"]
 files = [
-    {file = "tifffile-2025.9.30-py3-none-any.whl", hash = "sha256:0b2c42b6821583335407a8c48686358fcfee6e9e94f38895cbf9b111a6186c86"},
-    {file = "tifffile-2025.9.30.tar.gz", hash = "sha256:1a259f11e94489a9ab599e4e9f40a0e72b17cad206587097209f630768dfcdf3"},
+    {file = "tifffile-2025.10.4-py3-none-any.whl", hash = "sha256:7687d691e49026053181470cec70fa9250e3a586b2041041297e38b10bbd34e1"},
+    {file = "tifffile-2025.10.4.tar.gz", hash = "sha256:2e437c16ab211be5bcdc79f71b4907359115f1f83b5d919e7c297c29725d3e38"},
 ]
 
 [package.dependencies]
@@ -7689,4 +7689,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11"
-content-hash = "3347a02e0fc0a99a7c5ede6e699488ed5ed559fdffd20ba98b5b00588ff97830"
+content-hash = "a04815eb43fde8d9d8da6cc86815af15779654e63ef942d113094be1bf087b9e"
