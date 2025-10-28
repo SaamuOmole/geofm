@@ -2,3 +2,12 @@
 __pycache__/
 *.pyc
 .venv/
+
+# PyTorch / Lightning directories and artifacts
+output/
+output_multicrop/
+output_levirpluscd/
+
+*.ckpt
+checkpoints/
+lightning_logs/
