@@ -18,13 +18,21 @@ warnings.filterwarnings("ignore")
 # let user supply first provide the dataset path for now (prompt the llm I have path to images / apply the tool)
 # dataset_path = Path("/Users/samuel.omole/Desktop/repos/geofm_datasets/sen1floods11_v1.1")
 
-s2_means=[2357.089, 2137.385, 2018.788, 2082.986, 2295.651, 2854.537, 3122.849, 3040.560, 3306.481, 1473.847, 506.070, 2472.825, 1838.929]
+s2_means_13bands=[2357.089, 2137.385, 2018.788, 2082.986, 2295.651, 2854.537, 3122.849,
+                  3040.560, 3306.481, 1473.847, 506.070, 2472.825, 1838.929]
 s1_means=[-12.599, -20.293]
-s2_stds=[1624.683, 1675.806, 1557.708, 1833.702, 1823.738, 1733.977, 1732.131, 1679.732, 1727.26, 1024.687, 442.165, 1331.411, 1160.419]
+s2_stds_13bands=[1624.683, 1675.806, 1557.708, 1833.702, 1823.738, 1733.977, 1732.131,
+                 1679.732, 1727.26, 1024.687, 442.165, 1331.411, 1160.419]
 s1_stds=[5.195, 5.890]
 
-s2_path="/Users/samuel.omole/Desktop/repos/geofm_datasets/sen1floods11_v1.1/data/S2L1CHand/Somalia_699062_S2Hand.tif"
-s1_path="/Users/samuel.omole/Desktop/repos/geofm_datasets/sen1floods11_v1.1/data/S1GRDHand/Somalia_699062_S1Hand.tif"
+# Band order: B01, B02, B03, B04, B05, B06, B07, B08, B8A, B09, [B10 removed], B11, B12
+s2_means_12bands = [2357.089, 2137.385, 2018.788, 2082.986, 2295.651, 2854.537, 
+                    3122.849, 3040.560, 3306.481, 1473.847, 2472.825, 1838.929]  # Removed 506.070
+s2_stds_12bands = [1624.683, 1675.806, 1557.708, 1833.702, 1823.738, 1733.977, 
+                   1732.131, 1679.732, 1727.26, 1024.687, 1331.411, 1160.419]  # Removed 442.165
+
+# s2_path="/Users/samuel.omole/Desktop/repos/geofm_datasets/sen1floods11_v1.1/data/S2L1CHand/USA_994009_S2Hand.tif"
+# s1_path="/Users/samuel.omole/Desktop/repos/geofm_datasets/sen1floods11_v1.1/data/S1GRDHand/USA_994009_S1Hand.tif"
 def load_model_from_checkpoint(checkpoint_path):
     model = terratorch.tasks.SemanticSegmentationTask(
         model_factory="EncoderDecoderFactory",  # Combines a backbone with necks, the decoder, and a head
@@ -107,6 +115,34 @@ def normalize(tensor, means_orig, stds_orig):
     stds  = torch.tensor(stds_orig,  dtype=torch.float32).view(1,c,1,1)
     return (tensor - means) / stds
 
+def add_dummy_b10_band(s2_data: np.ndarray) -> np.ndarray:
+    """
+    Add a dummy B10 band (filled with zeros) at index 10.
+    Args:
+        s2_data: S2 data with shape (12, H, W)
+    
+    Returns:
+        S2 data with shape (13, H, W) with dummy B10 at index 10
+    """
+    if s2_data.shape[0] == 13:
+        return s2_data  # Already has 13 bands
+    
+    if s2_data.shape[0] != 12:
+        raise ValueError(f"Expected 12 bands, got {s2_data.shape[0]}")
+    
+    # Insert zeros at B10
+    dummy_b10 = np.zeros((1, s2_data.shape[1], s2_data.shape[2]), dtype=s2_data.dtype)
+    
+    # Split at B09 (index 9) and insert dummy B10
+    s2_with_b10 = np.concatenate([
+        s2_data[:10],   # B01-B09
+        dummy_b10,      # Dummy B10
+        s2_data[10:]    # B11-B12
+    ], axis=0)
+    
+    print("Warning: Added dummy B10 band (all zeros) for L2A compatibility for testing purposes")
+    return s2_with_b10
+
 def predict_pair(checkpoint_path: str, s2_path: str, s1_path: str, out_dir: str, show_plot: bool = True):
     """
     Predict using one S2L1C image and one S1GRD image.
@@ -122,12 +158,31 @@ def predict_pair(checkpoint_path: str, s2_path: str, s1_path: str, out_dir: str,
     device = model.device
 
     s2 = read_multiband_tif(s2_path)   # (C_s2, H, W)
+    #===============================================================
+    if s2.shape[0] == 12:
+        s2 = add_dummy_b10_band(s2) # Add dummy B10 band to make 13 for testing
+    #===============================================================
     s1 = read_multiband_tif(s1_path)   # (C_s1, H, W)
+    
+    # Determine which normalisation to use based on band count
+    num_s2_bands = s2.shape[0]
+    
+    if num_s2_bands == 13:
+        print("Using 13-band normalization (L1C)")
+        s2_means_use = s2_means_13bands
+        s2_stds_use = s2_stds_13bands
+    elif num_s2_bands == 12:
+        print("Using 12-band normalization (L2A without B10)")
+        s2_means_use = s2_means_12bands
+        s2_stds_use = s2_stds_12bands
+    else:
+        raise ValueError(f"Unexpected number of S2 bands: {num_s2_bands}. Expected 12 or 13.")
+    
 
     # Apply normalisation based on the means and stds per channel
     s2_tensor = normalize(numpy_to_tensor(s2).to(device),
-                          s2_means,
-                          s2_stds,
+                          s2_means_use,
+                          s2_stds_use,
     )   # (1, C_s2, H, W)
     s1_tensor = normalize(numpy_to_tensor(s1).to(device),
                           s1_means,
@@ -181,7 +236,7 @@ def predict_pair(checkpoint_path: str, s2_path: str, s1_path: str, out_dir: str,
     if s2_rgb is not None:
         overlay = s2_rgb.convert("RGBA")
         mask_color = Image.fromarray((pred_img).astype(np.uint8)).convert("L").resize(overlay.size)
-        red_layer = Image.new("RGBA", overlay.size, (255, 0, 0, 50))  # semi-transparent red
+        red_layer = Image.new("RGBA", overlay.size, (255, 0, 0, 100))  # semi-transparent red
         overlay.paste(red_layer, (0, 0), mask_color)
         overlay_path = os.path.join(out_dir, Path(s2_path).stem + "_overlay.png")
         overlay.save(overlay_path)
