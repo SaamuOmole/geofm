@@ -13,11 +13,12 @@ import shutil
 import warnings
 warnings.filterwarnings("ignore")
 
-# define model checkpoint and dataset paths
-# checkpoint_path = "/Users/samuel.omole/Desktop/repos/geofm/output/terramind_small_sen1floods11/checkpoints/best-mIoU.ckpt"
-# let user supply first provide the dataset path for now (prompt the llm I have path to images / apply the tool)
-# dataset_path = Path("/Users/samuel.omole/Desktop/repos/geofm_datasets/sen1floods11_v1.1")
+# An extension of the model_inference.py script to make
+# predictions given a pair of Sentinel-2 and Sentinel-1 images.
+# Works with the agent_pair.py and agent_tool_call.py, which both
+# have the predict_pair tool calling from here. 
 
+# Defining the means and stds for normalisation of corresponding bands
 s2_means_13bands=[2357.089, 2137.385, 2018.788, 2082.986, 2295.651, 2854.537, 3122.849,
                   3040.560, 3306.481, 1473.847, 506.070, 2472.825, 1838.929]
 s1_means=[-12.599, -20.293]
@@ -31,14 +32,21 @@ s2_means_12bands = [2357.089, 2137.385, 2018.788, 2082.986, 2295.651, 2854.537,
 s2_stds_12bands = [1624.683, 1675.806, 1557.708, 1833.702, 1823.738, 1733.977, 
                    1732.131, 1679.732, 1727.26, 1024.687, 1331.411, 1160.419]  # Removed 442.165
 
-# s2_path="/Users/samuel.omole/Desktop/repos/geofm_datasets/sen1floods11_v1.1/data/S2L1CHand/USA_994009_S2Hand.tif"
-# s1_path="/Users/samuel.omole/Desktop/repos/geofm_datasets/sen1floods11_v1.1/data/S1GRDHand/USA_994009_S1Hand.tif"
-def load_model_from_checkpoint(checkpoint_path):
+def load_model_from_checkpoint(checkpoint_path: str):
+    """
+    Load finetuned geospatial foundation model from a checkpoint
+
+    Args:
+        checkpoint_path (str): The path to the saved model
+
+    Returns:
+        The finetuned geospatial foundation model
+    """
     model = terratorch.tasks.SemanticSegmentationTask(
         model_factory="EncoderDecoderFactory",  # Combines a backbone with necks, the decoder, and a head
         model_args={
             # TerraMind backbone
-            "backbone": "terramind_v1_small", # change to specific model e.g., for large version: terramind_v1_large 
+            "backbone": "terramind_v1_small", # Change to specific model e.g., for large version: terramind_v1_large 
             "backbone_pretrained": True,
             "backbone_modalities": ["S2L1C", "S1GRD"],
             # Optionally, define the input bands. This is only needed if you select a subset of the pre-training bands, as explained above.
@@ -62,12 +70,12 @@ def load_model_from_checkpoint(checkpoint_path):
             
             # Head
             "head_dropout": 0.1,
-            "num_classes": 2, # there are two classes in the mask label image
+            "num_classes": 2, # There are two classes in the mask label image
         },
         
         loss="dice",  # dice is recommended for binary tasks and ce for multi-class tasks. 
         optimizer="AdamW",
-        lr=2e-5,  # We can perform hyperparameter optimization using terratorch-iterate but we have demonstrated that  
+        lr=2e-5,
         ignore_index=-1,
         freeze_backbone=True, # Setting as True speeds up fine-tuning. It is recommended to fine-tune the backbone as well for the best performance. 
         freeze_decoder=False, # Should be false to update the decoder layer parameters
@@ -82,6 +90,19 @@ def load_model_from_checkpoint(checkpoint_path):
     return model
 
 def read_multiband_tif(path: str):
+    """
+    Reads the Setinel images from a path
+    and returns an array equivalent
+
+    Args:
+        path (str): Path to Sentinel images
+
+    Raises:
+        FileNotFoundError: When path doesn't exist
+
+    Returns:
+        Array of the Sentinel image
+    """
     path = str(path)
     if not os.path.exists(path):
         raise FileNotFoundError(f"Image file not found: {path}")
@@ -93,20 +114,41 @@ def read_multiband_tif(path: str):
 
 def numpy_to_tensor(arr: np.ndarray):
     """
-    arr_hwc: numpy array (H, W, C) in original units (e.g. raw DN, dB, etc.)
-    Returns torch tensor (1, C, H, W) as float32 in the SAME units (no division).
-    If target_size is provided, use PIL resize but keep scale (use interpolation then divide back as needed).
+    Converts numpy array (C, H, W) to torch tensor (1, C, H, W)
+
+    Args:
+        arr (np.ndarray): The Sentinel image array
+
+    Returns:
+        Torch tensor of shape (1, C, H, W)
     """
     if arr.ndim == 3 and arr.shape[2] <= 20:
         arr_hwc = arr.copy()
     elif arr.ndim == 3 and arr.shape[0] <= 20:
-        # C,H,W -> H,W,C
+        # C,H,W to H,W,C
         arr_hwc = np.transpose(arr, (1,2,0))
-    # Convert to float32 but preserve numeric range
+        
+    # Convert to float32
     arr_float = arr_hwc.astype(np.float32)
-    return torch.from_numpy(arr_float).permute(2,0,1).float().unsqueeze(0)  # (1,C,H,W) in original units
+    return torch.from_numpy(arr_float).permute(2,0,1).float().unsqueeze(0)  # (1, C, H, W)
 
 def normalize(tensor, means_orig, stds_orig):
+    """
+    Use the specified means and stds to
+    normalize the tensors
+
+    Args:
+        tensor: The torch tensor to be normalised
+        means_orig: The list of mean values per band
+        stds_orig: The list of std values per band
+
+    Raises:
+        ValueError: If the len of provided means and
+        stds don't match the channels provided
+
+    Returns:
+        Normalised tensor
+    """
     # tensor: (1,C,H,W)
     c = tensor.shape[1]
     if len(means_orig) != c or len(stds_orig) != c:
@@ -117,9 +159,11 @@ def normalize(tensor, means_orig, stds_orig):
 
 def add_dummy_b10_band(s2_data: np.ndarray) -> np.ndarray:
     """
-    Add a dummy B10 band (filled with zeros) at index 10.
+    When only 12 bands are available, add a dummy B10 band
+    (filled with zeros) at index 10. Added for testing purposes
+    and not intended for real use-case. 
     Args:
-        s2_data: S2 data with shape (12, H, W)
+        s2_data (np.ndarray): S2 data with shape (12, H, W)
     
     Returns:
         S2 data with shape (13, H, W) with dummy B10 at index 10
@@ -140,13 +184,27 @@ def add_dummy_b10_band(s2_data: np.ndarray) -> np.ndarray:
         s2_data[10:]    # B11-B12
     ], axis=0)
     
-    print("Warning: Added dummy B10 band (all zeros) for L2A compatibility for testing purposes")
+    print("Warning: Added dummy B10 band (all zeros) for compatibility for testing purposes")
     return s2_with_b10
 
 def predict_pair(checkpoint_path: str, s2_path: str, s1_path: str, out_dir: str, show_plot: bool = True):
     """
-    Predict using one S2L1C image and one S1GRD image.
-    Returns: dict with keys: output_image_path, overlay_path, raw_prediction (numpy)
+    Predicts water segmentation from pair of S2 and S1 images using
+    finetuned geospatial foundation model saved at a checkpoint . 
+
+    Args:
+        checkpoint_path (str): The path to finetuned geospatial model
+        s2_path (str): The path to S2 image
+        s1_path (str): The path to S1 image
+        out_dir (str): The output directory for predictions
+        show_plot (bool, optional): _description_. Defaults to True.
+
+    Raises:
+        ValueError: When S2 bands has neither 12 or 13 bands
+        ValueError: When unexpected model output format is encountered
+
+    Returns:
+        _type_: _description_
     """
     # delete out_dir everytime and recreate 
     if os.path.exists(out_dir):
@@ -157,16 +215,17 @@ def predict_pair(checkpoint_path: str, s2_path: str, s1_path: str, out_dir: str,
     model = load_model_from_checkpoint(checkpoint_path)
     device = model.device
 
-    s2 = read_multiband_tif(s2_path)   # (C_s2, H, W)
+    s2 = read_multiband_tif(s2_path) # (C_s2, H, W)
     #===============================================================
     if s2.shape[0] == 12:
         s2 = add_dummy_b10_band(s2) # Add dummy B10 band to make 13 for testing
     #===============================================================
-    s1 = read_multiband_tif(s1_path)   # (C_s1, H, W)
+    s1 = read_multiband_tif(s1_path) # (C_s1, H, W)
     
     # Determine which normalisation to use based on band count
     num_s2_bands = s2.shape[0]
     
+    # Cases when number of bands equals 12 or 13
     if num_s2_bands == 13:
         print("Using 13-band normalization (L1C)")
         s2_means_use = s2_means_13bands
@@ -189,7 +248,7 @@ def predict_pair(checkpoint_path: str, s2_path: str, s1_path: str, out_dir: str,
                           s1_stds,
     )   # (1, C_s1, H, W)
 
-    # Build input images dict like datamodule provides to provide to model
+    # Build input images dict like datamodule does to provide to model
     images = {
         "S2L1C": s2_tensor.to(device),   # shape (1, C, H, W)
         "S1GRD": s1_tensor.to(device),
@@ -204,26 +263,26 @@ def predict_pair(checkpoint_path: str, s2_path: str, s1_path: str, out_dir: str,
     if isinstance(img_preds, torch.Tensor):
         preds = torch.argmax(img_preds, dim=1).cpu().numpy()  # (B, H, W)
     else:
-        # If model returns a dict/other, adapt accordingly
-        raise ValueError("Unexpected model output format; inspect outputs to adapt postprocess")
+        # If model returns a dict/other
+        raise ValueError("Unexpected model output format; inspect outputs to correct error message")
 
     # Select the first and only prediction
     pred_mask = preds[0]
-    # out_mask_path = os.path.join(out_dir, Path(s2_path).stem + "_pred_mask.png") # no need to save this
+    # out_mask_path = os.path.join(out_dir, Path(s2_path).stem + "_pred_mask.png") # No need to save this
 
-    # convert predicted binary mask to image and save (0/1 -> 0/255)
+    # Convert predicted binary mask to image and save (0/1 to 0/255)
     pred_img = (pred_mask.astype(np.uint8) * 255)
-    # Image.fromarray(pred_img).save(out_mask_path) # no need to save this
+    # Image.fromarray(pred_img).save(out_mask_path) # No need to save this
 
-    # extract the S2 RGB channels for plotting purpose
+    # Extract the S2 RGB channels for plotting purpose
     s2_rgb = None
     try:
         if s2.shape[0] <= 20:
-            # indices chosen in your datamodule rgb_indices = [3,2,1] (1-based in your config). convert to 0-based
+            # Convert to 0-based rgb_indices
             rgb_idx = [3, 2, 1]  # user-specified earlier
             rgb_idx0 = [i - 1 for i in rgb_idx if i - 1 < s2.shape[0]]
             rgb_arr = np.transpose(s2[rgb_idx0, :, :], (1, 2, 0))
-            # normalize for display
+            # Normalize for display
             rgb_arr = rgb_arr - rgb_arr.min()
             if rgb_arr.max() > 0:
                 rgb_arr = rgb_arr / rgb_arr.max()
@@ -232,7 +291,7 @@ def predict_pair(checkpoint_path: str, s2_path: str, s1_path: str, out_dir: str,
     except Exception:
         s2_rgb = None
 
-    # overlay predicted image on S2 RGB
+    # Overlay predicted image on S2 RGB
     if s2_rgb is not None:
         overlay = s2_rgb.convert("RGBA")
         mask_color = Image.fromarray((pred_img).astype(np.uint8)).convert("L").resize(overlay.size)
@@ -255,7 +314,8 @@ def predict_pair(checkpoint_path: str, s2_path: str, s1_path: str, out_dir: str,
         for a in ax:
             a.axis("off")
         plt.tight_layout()
-        # to save the image
+        
+        # Save the image
         fig_path = os.path.join(out_dir, Path(s2_path).stem + "_figure.png")
         fig.savefig(fig_path)
         plt.close(fig)

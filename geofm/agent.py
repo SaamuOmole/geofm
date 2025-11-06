@@ -3,15 +3,25 @@ from langchain_ollama import ChatOllama
 from langchain_core.tools import tool
 from geofm.model_inference import predict_image_batches
 
+# This script is the starting point for the agentic workflow
+# which progressed to the more complicated agent_pair.py and
+# agent_tool_call.py scripts. This script works on a batch
+# test set of S2 and S1 images.
+
 @tool
 def predict_image_batches_tool(checkpoint_path, dataset_path):
     """
     Predict and plot water segmentation
-    of example batch image using the model
-    checkpoint and dataset paths. 
+    of example batch images using the
+    model checkpoint and dataset paths.
     """
     return predict_image_batches(checkpoint_path, dataset_path)
+
 def main():
+    """
+    The main call to the language model which runs
+    the model as well as provided tools to it. 
+    """
     model = ChatOllama(model="mistral:7b")
     model_with_tools = model.bind_tools([predict_image_batches_tool])
 
@@ -22,7 +32,6 @@ def main():
         f"Predict and plot an example batch image from model checkpoint path {checkpoint_path} and dataset path {dataset_path}"
     )
 
-    # print(response.tool_calls)
     arguments = response.tool_calls[0]["args"]
     predict_image_batches_tool.invoke(arguments)
 

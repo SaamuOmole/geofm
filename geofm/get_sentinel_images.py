@@ -12,9 +12,15 @@ from PIL import Image
 import requests
 from io import BytesIO
 import shutil
+import traceback
+
+# Script to get Sentinel 2 and Sentinel 1 images from the Microsoft Planetary Computer STAC API
+# Only Sentinel-2-L2A imnages, with 12 bands, are provided by this API. To get the Sentinel-2-L1C
+# images in all 13 bands, the Google Earth Engine or Copernicus API may be used. However, this
+# script has extracted the Sentinel-2-L2A images and added an extra dummy band for test purposes. 
 
 def search_sentinel_data(
-    bbox: List[float],  # [min_lon, min_lat, max_lon, max_lat]
+    bbox: List[float],
     start_date: str,
     end_date: str,
     collections: List[str],
@@ -22,17 +28,18 @@ def search_sentinel_data(
 ) -> List[pystac_client.item_search.Item]:
     """
     Search for Sentinel data using Microsoft Planetary Computer STAC API.
-    
+
     Args:
-        bbox: Bounding box [min_lon, min_lat, max_lon, max_lat]
-        start_date: Start date in format 'YYYY-MM-DD'
-        end_date: End date in format 'YYYY-MM-DD'
-        collections: List of collection names (e.g., ['sentinel-2-l2a', 'sentinel-1-grd'])
-        max_cloud_cover: Maximum cloud cover percentage (for Sentinel-2)
-    
+        bbox (List[float]): Bounding box [min_lon, min_lat, max_lon, max_lat]
+        start_date (str): Start date in format 'YYYY-MM-DD'
+        end_date (str): End date in format 'YYYY-MM-DD'
+        collections (List[str]): List of collection names (e.g., ['sentinel-2-l2a', 'sentinel-1-grd'])
+        max_cloud_cover (float, optional): Maximum cloud cover percentage (for Sentinel-2). Defaults to 20.0.
+
     Returns:
-        List of STAC items matching the search criteria
+        List[pystac_client.item_search.Item]: List of STAC items matching the search criteria
     """
+
     catalog = pystac_client.Client.open(
         "https://planetarycomputer.microsoft.com/api/stac/v1",
         modifier=planetary_computer.sign_inplace,
@@ -53,92 +60,7 @@ def search_sentinel_data(
     items = list(search.items())
     print(f"Found {len(items)} items matching search criteria")
     return items
-
-
-# def download_and_crop_image(
-#     item: pystac_client.item_search.Item,
-#     asset_keys: List[str],
-#     output_path: str,
-#     tile_size: Tuple[int, int] = (512, 512),
-#     center_crop: bool = True
-# ) -> Optional[str]:
-#     """
-#     Download image from STAC item and crop to specified size.
     
-#     Args:
-#         item: STAC item containing the image
-#         asset_keys: List of asset keys to download (e.g., ['B02', 'B03', 'B04'] for RGB)
-#         output_path: Path to save the cropped image
-#         tile_size: Size of the output tile (width, height)
-#         center_crop: If True, crop from center; otherwise crop from top-left
-    
-#     Returns:
-#         Path to saved image or None if failed
-#     """
-#     try:
-#         # Get the first available asset
-#         asset_key = None
-#         for key in asset_keys:
-#             if key in item.assets:
-#                 asset_key = key
-#                 break
-        
-#         if not asset_key:
-#             print(f"None of the requested assets {asset_keys} found in item")
-#             return None
-        
-#         asset = item.assets[asset_key]
-#         href = asset.href
-        
-#         # Sign the URL if needed (for Planetary Computer)
-#         if hasattr(planetary_computer, 'sign'):
-#             href = planetary_computer.sign(href)
-        
-#         print(f"Downloading from: {asset_key}")
-        
-#         # Open the raster with rasterio
-#         with rasterio.open(href) as src:
-#             # Get image dimensions
-#             height, width = src.height, src.width
-            
-#             # Calculate crop window
-#             if center_crop:
-#                 col_off = max(0, (width - tile_size[0]) // 2)
-#                 row_off = max(0, (height - tile_size[1]) // 2)
-#             else:
-#                 col_off = 0
-#                 row_off = 0
-            
-#             # Ensure we don't exceed image bounds
-#             actual_width = min(tile_size[0], width - col_off)
-#             actual_height = min(tile_size[1], height - row_off)
-            
-#             window = Window(col_off, row_off, actual_width, actual_height)
-            
-#             # Read the data
-#             data = src.read(window=window)
-            
-#             # Save as GeoTIFF with same profile
-#             profile = src.profile.copy()
-#             profile.update({
-#                 'height': actual_height,
-#                 'width': actual_width,
-#                 'transform': rasterio.windows.transform(window, src.transform)
-#             })
-            
-#             os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            
-#             with rasterio.open(output_path, 'w', **profile) as dst:
-#                 dst.write(data)
-            
-#             print(f"Saved cropped image to: {output_path}")
-#             return output_path
-            
-#     except Exception as e:
-#         print(f"Error downloading/cropping image: {e}")
-#         return None
-
-
 def download_multiband_sentinel2(
     item: pystac_client.item_search.Item,
     output_path: str,
@@ -147,20 +69,20 @@ def download_multiband_sentinel2(
 ) -> Optional[str]:
     """
     Download multi-band Sentinel-2 image.
-    
+
     Args:
-        item: STAC item for Sentinel-2
-        output_path: Path to save the image
-        bands: List of band names (e.g., ['B02', 'B03', 'B04', 'B08']). If None, downloads all bands.
-        tile_size: Size of output tile
-    
+        item (pystac_client.item_search.Item): STAC item for Sentinel-2
+        output_path (str): Path to save the image
+        bands (Optional[List[str]], optional): List of band names. If None, downloads all bands. Defaults to None.
+        tile_size (Tuple[int, int], optional): Size of output tile. Defaults to (512, 512).
+
     Returns:
-        Path to saved image or None if failed
+        Optional[str]: Path to saved image or None if failed
     """
     try:
         # Default to all visible and NIR bands if not specified
         if bands is None:
-            bands = ['B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B8A', 'B09', 'B10', 'B11', 'B12']
+            bands = ['B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B8A', 'B09', 'B11', 'B12']
         
         available_bands = [b for b in bands if b in item.assets]
         
@@ -185,7 +107,7 @@ def download_multiband_sentinel2(
             
             window = Window(col_off, row_off, actual_width, actual_height)
             
-            # Prepare output array
+            # Prepare output array to add to
             band_data = []
             
             # Read each band
@@ -222,7 +144,6 @@ def download_multiband_sentinel2(
         print(f"Error downloading Sentinel-2 multi-band image: {e}")
         return None
 
-
 def download_sentinel1(
     item: pystac_client.item_search.Item,
     output_path: str,
@@ -231,15 +152,15 @@ def download_sentinel1(
 ) -> Optional[str]:
     """
     Download Sentinel-1 SAR image.
-    
+
     Args:
-        item: STAC item for Sentinel-1
-        output_path: Path to save the image
-        polarizations: List of polarizations (e.g., ['vv', 'vh']). If None, downloads all available.
-        tile_size: Size of output tile
-    
+        item (pystac_client.item_search.Item): STAC item for Sentinel-1
+        output_path (str): Path to save the image
+        polarizations (Optional[List[str]], optional): List of polarizations (e.g., ['vv', 'vh']). If None, downloads all available. Defaults to None.
+        tile_size (Tuple[int, int], optional): Size of output tile. Defaults to (512, 512).
+
     Returns:
-        Path to saved image or None if failed
+        Optional[str]: Path to saved image or None if failed
     """
     try:
         # Default polarizations
@@ -313,27 +234,26 @@ def find_and_download_sentinel_images(
     tile_size: int,
 ) -> Dict[str, Any]:
     """
-    Find and download Sentinel-2 (S2L1C/L2A) and Sentinel-1 (S1GRD) images from Microsoft Planetary Computer.
-    
+    Find and download Sentinel-2 (S2L2A) and Sentinel-1 (S1GRD) images from Microsoft Planetary Computer.
+
     Args:
-        location: Location as string (city name) or bounding box as "min_lon,min_lat,max_lon,max_lat"
-        start_date: Start date in format 'YYYY-MM-DD'
-        end_date: End date in format 'YYYY-MM-DD' (optional, defaults to start_date + 7 days)
-        output_dir: Directory to save downloaded images
-        max_cloud_cover: Maximum cloud cover percentage for Sentinel-2 (0-100)
-        tile_size: Size of the output tiles (will be tile_size x tile_size)
-    
+        location (str): Location as bounding box in format "min_lon,min_lat,max_lon,max_lat"
+        start_date (str): Start date in format 'YYYY-MM-DD'
+        end_date (Optional[str]): End date in format 'YYYY-MM-DD' (optional, defaults to start_date + 7 days)
+        output_dir (str): Directory to save downloaded images
+        max_cloud_cover (float): Maximum cloud cover percentage for Sentinel-2 (0-100)
+        tile_size (int): Size of the output tiles (will be tile_size x tile_size)
+
     Returns:
-        Dictionary containing paths to downloaded Sentinel-2 and Sentinel-1 images
+        Dict[str, Any]: Dictionary containing paths to downloaded Sentinel-2 and Sentinel-1 images
     """
     try:
         # Parse location to bbox
-        # Possible to use a proper geocoding API to extract bbox for location
         if ',' in location and location.count(',') == 3:
             # Already a bbox
             bbox = [float(x.strip()) for x in location.split(',')]
         else:
-            # For now, provide some example coordinates
+            # If location not properly given, then uses a default
             print(f"Location name provided: {location}")
             print("Please provide bbox as 'min_lon,min_lat,max_lon,max_lat' for more accurate results")
             
@@ -365,7 +285,7 @@ def find_and_download_sentinel_images(
             "metadata": []
         }
         
-        # Search for Sentinel-2 L2A (atmospherically corrected)
+        # Search for Sentinel-2 L2A
         print("\n" + "="*60)
         print("Searching for Sentinel-2 L2A data...")
         print("="*60)
@@ -384,12 +304,13 @@ def find_and_download_sentinel_images(
             print(f"\nDownloading Sentinel-2 from: {item.datetime}")
             print(f"Cloud cover: {item.properties.get('eo:cloud_cover', 'N/A')}%")
             
-            # Define bands to download (all 13 bands for S2L2A)
-            s2_bands = ['B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B8A', 'B09', 'B10', 'B11', 'B12']
+            # Define bands to download
+            s2_bands = ['B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B8A', 'B09', 'B11', 'B12']
             
             s2_filename = f"S2L2A_{item.datetime.strftime('%Y%m%d')}.tif"
             s2_path = os.path.join(output_dir, s2_filename)
             
+            # Download the S2 bands 
             downloaded_s2 = download_multiband_sentinel2(
                 item=item,
                 output_path=s2_path,
@@ -452,7 +373,6 @@ def find_and_download_sentinel_images(
         
     except Exception as e:
         print(f"Error in find_and_download_sentinel_images: {e}")
-        import traceback
         traceback.print_exc()
         return {
             "error": str(e),

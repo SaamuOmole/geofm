@@ -4,6 +4,14 @@ from langchain_core.tools import tool
 from geofm.model_inference_pair import predict_pair
 from geofm.get_sentinel_images import find_and_download_sentinel_images
 
+# This is a more complicated example of expanding the agent_pair.py tool call.
+# Here, 2 tools namely, get_satellite_data and predict_pair_tool are provided
+# to the language model. The get_satellite_data uses the Microsoft Planetary
+# Computer STAC API to download the Sentinel-2 and Sentinel-1 images when a
+# location and date parameters are provided as part of a prompt.
+# The predict_pair_tool then grabs these image pair to make predictions using
+# a known model saved at an endpoint. 
+
 @tool
 def get_satellite_data(location: str,
                        start_date: str,
@@ -13,7 +21,8 @@ def get_satellite_data(location: str,
                        tile_size: int,
                        ):
     """
-    Download Sentinel-2 and Sentinel-1 satellite images for a given location and time period.
+    Download Sentinel-2 and Sentinel-1 satellite images for a given
+    location and time period from an API.
 
     Args:
         location (str): Bounding box as "min_lon,min_lat,max_lon,max_lat"
@@ -36,7 +45,7 @@ def find_sentinel_tiff_filepath(images_dir: str):
         images_dir (str): Directory where S2 and S1 images are located
 
     Returns:
-        _type_: _description_
+        Separated S2 and S1 file paths
     """
     images_path = Path(images_dir)
     # Find all TIFF files
@@ -62,17 +71,17 @@ def find_sentinel_tiff_filepath(images_dir: str):
 @tool
 def predict_pair_tool(checkpoint_path: str, sentinel_images_dir: str, out_dir: str):
     """
-    Predict and plot water segmentation of example
-    pair of Sentinel-2 and Sentinel-1 images when
-    provided with model checkpoint and images paths.
+    Predict and plot water segmentation from example
+    pair of downloaded Sentinel-2 and Sentinel-1 images
+    when provided with model checkpoint and images paths.
     Predicted image will be plotted alongside the
     ground-truth Sentinel-2 RGB and saved to out_dir
     as well an overlay of the predicted mask on the 
     Sentinel-2 RGB.
 
     Args:
-        checkpoint_path (str): Path ti the model checkpoint file
-        images_path (str): Path to Sentinel-2 L1C TIFF image & Sentinel-1 GRD TIFF image
+        checkpoint_path (str): Path to the model checkpoint file
+        images_path (str): Path to Sentinel-2 & Sentinel-1 TIFF images
         out_dir (str): Output directory to save predictions
 
     Returns:
@@ -87,12 +96,18 @@ def predict_pair_tool(checkpoint_path: str, sentinel_images_dir: str, out_dir: s
     return predict_pair(checkpoint_path, s2_path, s1_path, out_dir)
 
 def main():
-    # define language model and provide tools to it
-    # 2 tools to grab satellite data (S2 & S1 images) from API and make predictions on them
+    """
+    The main call to the language model which runs
+    the model as well as provided tools to it. The
+    get_satellite_data and predict_pair_tool are
+    provided to the language model as tools it can
+    access
+    """
+    # Define language model and provide tools to it
     model = ChatOllama(model="mistral:7b")
     model_with_tools = model.bind_tools([get_satellite_data, predict_pair_tool])
 
-    # define paths for tool 1
+    # Specify paths for tool 1
     location="-0.1,51.5,-0.05,51.52"  # for ~London
     start_date="2024-06-01"
     end_date="2024-06-30"
@@ -100,7 +115,7 @@ def main():
     max_cloud_cover=30.0
     tile_size=512
     
-    # define paths for tool 2
+    # Specify paths for tool 2
     checkpoint_path = "/Users/samuel.omole/Desktop/repos/geofm/output/terramind_small_sen1floods11/checkpoints/best-mIoU.ckpt"
     sentinel_images_dir = output_dir
     out_dir = "/Users/samuel.omole/Desktop/repos/geofm_datasets/prediction_pair"
@@ -137,10 +152,6 @@ def main():
     response = model_with_tools.invoke(prompt)
     
     print(f"\nModel response content: {response.content if hasattr(response, 'content') else 'N/A'}")
-    # try: 
-    #     print("response:", response)
-    # except Exception as e:
-    #     print("Error printing response:", e)
     
     # Get the tool calls
     tool_calls = getattr(response, "tool_calls", None)
@@ -186,9 +197,9 @@ def main():
     print(f"Found {len(tool_calls)} tool call(s)")
     print("="*60)
     
-    # If there is at least one tool call
     download_completed = False
     
+    # Loop through tool calls
     for i, call in enumerate(tool_calls):
         tool_name = call.get('name') if isinstance(call, dict) else None
         args = call.get('args') if isinstance(call, dict) else None

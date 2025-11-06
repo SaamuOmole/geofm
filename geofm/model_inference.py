@@ -10,11 +10,19 @@ from terratorch.datamodules import GenericNonGeoSegmentationDataModule
 import warnings
 warnings.filterwarnings("ignore")
 
-# define model checkpoint and dataset paths
-# checkpoint_path = "/Users/samuel.omole/Desktop/repos/geofm/output/terramind_small_sen1floods11/checkpoints/best-mIoU.ckpt"
-# let user supply first provide the dataset path for now (prompt the llm I have path to images / apply the tool)
-# dataset_path = Path("/Users/samuel.omole/Desktop/repos/geofm_datasets/sen1floods11_v1.1")
-def load_model_from_checkpoint(checkpoint_path):
+# Works with the agent.py, which has its predict_image_batches_tool
+# calling from the predict_image_batches here
+
+def load_model_from_checkpoint(checkpoint_path: str):
+    """
+    Load finetuned geospatial foundation model from a checkpoint
+
+    Args:
+        checkpoint_path (str): The path to the saved model
+
+    Returns:
+        The finetuned geospatial foundation model
+    """
     model = terratorch.tasks.SemanticSegmentationTask(
         model_factory="EncoderDecoderFactory",  # Combines a backbone with necks, the decoder, and a head
         model_args={
@@ -43,17 +51,17 @@ def load_model_from_checkpoint(checkpoint_path):
             
             # Head
             "head_dropout": 0.1,
-            "num_classes": 2, # there are two classes in the mask label image
+            "num_classes": 2, # There are two classes in the mask label image
         },
         
         loss="dice",  # dice is recommended for binary tasks and ce for multi-class tasks. 
         optimizer="AdamW",
-        lr=2e-5,  # We can perform hyperparameter optimization using terratorch-iterate but we have demonstrated that  
+        lr=2e-5, 
         ignore_index=-1,
         freeze_backbone=True, # Setting as True speeds up fine-tuning. It is recommended to fine-tune the backbone as well for the best performance. 
         freeze_decoder=False, # Should be false to update the decoder layer parameters
         plot_on_val=True,  # Plot predictions during validation steps  
-        class_names=["Others", "Water"]  # optionally define class names
+        class_names=["Others", "Water"]  # Optionally define class names
     )
     model = terratorch.tasks.SemanticSegmentationTask.load_from_checkpoint(
         checkpoint_path,
@@ -62,7 +70,18 @@ def load_model_from_checkpoint(checkpoint_path):
     )
     return model
 
-def create_datamodule(dataset_path):
+def create_datamodule(dataset_path: str):
+    """
+    Prepares a TerraTorch datamodule for
+    the geospatial foundation model to
+    work with
+
+    Args:
+        dataset_path (str): The path to Sentinel dataset
+
+    Returns:
+        The TerraTorch datamodule
+    """
     dataset_path = Path(dataset_path)
     datamodule = terratorch.datamodules.GenericMultiModalDataModule(
         task="segmentation",
@@ -133,22 +152,31 @@ def create_datamodule(dataset_path):
     return datamodule
 
 
-def predict_image_batches(checkpoint_path, dataset_path):
+def predict_image_batches(checkpoint_path: str, dataset_path: str):
+    """
+    Predicts and plots example test image
+    from the S2 and S1 batch of images
+
+    Args:
+        checkpoint_path (str): Path to the finetuned model
+        dataset_path (str): Path to the dataset
+    """
+    # Load model and create datamodule
     model = load_model_from_checkpoint(checkpoint_path)
     datamodule = create_datamodule(dataset_path)
-    # set datamodule for test set
+    
+    # Set datamodule for test set
     datamodule.setup("test")
     test_dataset = datamodule.test_dataset
     print("Length of test dataset is: ", len(test_dataset))
 
-    # pass the test set in batches (selecting only first batch) 
+    # Pass the test set in batches (selecting only first batch) 
     test_loader = datamodule.test_dataloader()
     with torch.no_grad():
         batch = next(iter(test_loader)) # this only selects the first batch in the test_dataloader
         images = batch["image"]
         for mod, value in images.items():
             images[mod] = value.to(model.device)
-        # masks = batch["mask"].numpy()
 
         with torch.no_grad():
             outputs = model(images)
