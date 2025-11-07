@@ -108,11 +108,12 @@ def main():
     model_with_tools = model.bind_tools([get_satellite_data, predict_pair_tool])
 
     # Specify paths for tool 1
-    location="-0.1,51.5,-0.05,51.52"  # for ~London
-    start_date="2024-06-01"
-    end_date="2024-06-30"
+    # location="-0.1,51.5,-0.05,51.52"  # For ~London
+    location="-2.85,53.20,-2.25,53.65" # For ~Warrington area of UK
+    start_date="2024-01-01" # "2024-06-01"
+    end_date="2025-11-06" # "2024-06-30"
     output_dir="/Users/samuel.omole/Desktop/repos/geofm_datasets/test_satellite_data"
-    max_cloud_cover=30.0
+    max_cloud_cover=10.0 # 30.0
     tile_size=512
     
     # Specify paths for tool 2

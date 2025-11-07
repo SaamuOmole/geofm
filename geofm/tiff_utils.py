@@ -215,13 +215,13 @@ def quick_view(s2_path: Optional[str] = None, s1_path: Optional[str] = None):
 
 if __name__ == "__main__":
     # Visualize all downloaded images in a directory
-    # visualize_downloaded_images("/Users/samuel.omole/Desktop/repos/geofm_datasets/test_satellite_data/")
+    visualize_downloaded_images("/Users/samuel.omole/Desktop/repos/geofm_datasets/test_satellite_data/")
     
     # Visualize specific images with known names
-    quick_view(
-        s2_path="/Users/samuel.omole/Desktop/repos/geofm_datasets/test_satellite_data/S2L2A_20240626.tif",
-        s1_path="/Users/samuel.omole/Desktop/repos/geofm_datasets/test_satellite_data/S1GRD_20240630.tif"
-    )
+    # quick_view(
+    #     s2_path="/Users/samuel.omole/Desktop/repos/geofm_datasets/test_satellite_data/S2L2A_20240605.tif",
+    #     s1_path="/Users/samuel.omole/Desktop/repos/geofm_datasets/test_satellite_data/S1GRD_20240630.tif"
+    # )
 
     # Visualize individual TIFF images
     # visualize_sentinel2(
